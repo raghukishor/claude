@@ -1,0 +1,391 @@
+https://claude.ai/share/c89a73fe-e8bf-4f10-8d84-b11fb0a9af2e
+
+# Enhanced Distributed Worker Service Implementation with Cosmos DB Change Feed Processor Patterns
+
+## Project Overview
+Create a .NET 8 Worker Service that processes changes from an external API using proven Azure Cosmos DB Change Feed Processor patterns for distributed, fault-tolerant coordination across multiple machines. The service will implement lease-based work distribution with automatic failover and dynamic scaling capabilities.
+
+## Architecture Improvements Based on Cosmos DB Change Feed Processor
+
+### Key Patterns Adopted
+1. **Lease Container Pattern**: The lease container acts as state storage and coordinates the processing of the change feed across multiple workers
+2. **Observer Pattern**: The change feed processor library follows the observer pattern, where your processing function is called by the library
+3. **At-Least-Once Delivery**: The main benefit of using the change feed processor is its fault-tolerant design, which assures an "at-least-once" delivery of all the events in the change feed
+4. **Dynamic Scaling**: The change feed processor can dynamically adjust a container's scale if the container's throughput or storage increases
+
+## Core Requirements
+
+### 1. Service Architecture
+- **Base**: .NET 8 Worker Service with Change Feed Processor patterns
+- **Pattern**: Distributed processing with lease-based coordination using proven Cosmos DB patterns
+- **Storage**: Azure Cosmos DB with dedicated lease container and monitoring container
+- **Authentication**: OAuth 2.0 for external API
+- **Data Format**: JSON responses from external API
+- **Error Handling**: Retry mechanism with "at-least-once" guarantee
+
+### 2. External API Integration
+The service integrates with an external API that has two endpoints:
+- **Metadata Endpoint**: Returns list of tasks (key ranges) that need processing
+- **GetChanges Endpoint**: Returns changes for a specific task/key range
+
+### 3. Enhanced Distributed Coordination (Change Feed Processor Style)
+- **Deployment Units**: Multiple worker instances with same processor name but different instance names
+- **Lease Management**: Automatic lease acquisition, renewal, and release
+- **Dynamic Load Balancing**: Automatic redistribution of work when instances join/leave
+- **Fault Tolerance**: Automatic failover with lease expiration and recovery
+- **Life Cycle Notifications**: Comprehensive monitoring of lease state changes
+
+## Detailed Technical Specifications
+
+### Container Architecture (Following Change Feed Processor Pattern)
+
+#### Lease Container Schema
+```json
+{
+  "id": "keyrange-001-processor-external-api",
+  "partitionKey": "keyrange-001", 
+  "processorName": "external-api-processor",
+  "keyRangeId": "keyrange-001",
+  "owner": "worker-instance-123",
+  "ownerInstanceName": "worker-instance-123",
+  "leaseToken": "lease-token-abc123",
+  "acquiredAt": "2025-06-15T10:00:00Z",
+  "renewedAt": "2025-06-15T10:29:45Z",
+  "expiresAt": "2025-06-15T10:30:00Z",
+  "state": "owned", // owned, available, expired
+  "lastProcessedTimestamp": "2025-06-15T10:29:45Z",
+  "lastProcessedOffset": "abc123def456",
+  "continuationToken": "continuation-token-xyz",
+  "ttl": 3600,
+  "_etag": "...",
+  "_ts": 1718446185
+}
+```
+
+#### Monitoring Container (for API State Tracking)
+```json
+{
+  "id": "api-state-tracker",
+  "partitionKey": "api-state",
+  "lastMetadataCheck": "2025-06-15T10:29:45Z",
+  "availableKeyRanges": ["keyrange-001", "keyrange-002"],
+  "totalProcessedCount": 12345,
+  "lastError": null,
+  "healthStatus": "healthy"
+}
+```
+
+## Enhanced Components (Based on Change Feed Processor Architecture)
+
+### 1. Main Worker Service (Host)
+```csharp
+public class ExternalApiChangeProcessorWorker : BackgroundService
+{
+    private readonly ExternalApiChangeProcessor _processor;
+    private readonly ILogger<ExternalApiChangeProcessorWorker> _logger;
+
+    // Implements the hosting pattern similar to Change Feed Processor
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await _processor.StartAsync(stoppingToken);
+        
+        // Keep running until cancellation
+        await Task.Delay(Timeout.Infinite, stoppingToken);
+        
+        await _processor.StopAsync();
+    }
+}
+```
+
+### 2. External API Change Processor (Core Engine)
+```csharp
+public class ExternalApiChangeProcessor
+{
+    // Builder pattern following Change Feed Processor design
+    public static ExternalApiChangeProcessorBuilder Create(
+        string processorName,
+        Func<ExternalApiProcessorContext, IReadOnlyCollection<ExternalApiChange>, CancellationToken, Task> onChangesDelegate)
+    
+    // Life cycle methods
+    public async Task StartAsync(CancellationToken cancellationToken = default);
+    public async Task StopAsync();
+    
+    // Configuration methods (fluent interface)
+    public ExternalApiChangeProcessor WithInstanceName(string instanceName);
+    public ExternalApiChangeProcessor WithLeaseContainer(Container leaseContainer);
+    public ExternalApiChangeProcessor WithLeaseAcquireNotification(LeaseAcquireDelegate onLeaseAcquired);
+    public ExternalApiChangeProcessor WithLeaseReleaseNotification(LeaseReleaseDelegate onLeaseReleased);
+    public ExternalApiChangeProcessor WithErrorNotification(ErrorNotificationDelegate onError);
+    public ExternalApiChangeProcessor WithLeaseAcquireInterval(TimeSpan interval);
+    public ExternalApiChangeProcessor WithLeaseExpirationTime(TimeSpan expiration);
+    public ExternalApiChangeProcessor WithLeaseRenewalInterval(TimeSpan renewal);
+    public ExternalApiChangeProcessor WithMaxDegreeOfParallelism(int maxParallelism);
+    public ExternalApiChangeProcessor WithPollInterval(TimeSpan pollInterval);
+}
+```
+
+### 3. Lease Manager (Based on Change Feed Processor Lease Pattern)
+```csharp
+public class ExternalApiLeaseManager
+{
+    // Core lease operations following Change Feed Processor patterns
+    public async Task<IEnumerable<ExternalApiLease>> GetAllLeasesAsync();
+    public async Task<ExternalApiLease> TryAcquireLeaseAsync(string keyRangeId, string instanceName);
+    public async Task<bool> RenewLeaseAsync(ExternalApiLease lease);
+    public async Task ReleaseLeaseAsync(ExternalApiLease lease);
+    public async Task UpdateCheckpointAsync(ExternalApiLease lease, ExternalApiCheckpoint checkpoint);
+    
+    // Dynamic scaling support
+    public async Task<IEnumerable<ExternalApiLease>> GetAvailableLeasesAsync();
+    public async Task<IEnumerable<ExternalApiLease>> GetExpiredLeasesAsync();
+    public async Task RebalanceLeasesAsync(IEnumerable<string> activeInstances);
+}
+```
+
+### 4. Enhanced API Client with Circuit Breaker
+```csharp
+public class ExternalApiClient
+{
+    // OAuth 2.0 with automatic token refresh
+    private readonly IOAuthTokenProvider _tokenProvider;
+    private readonly ICircuitBreakerPolicy _circuitBreaker;
+    private readonly IRetryPolicy _retryPolicy;
+    
+    public async Task<ExternalApiMetadata> GetMetadataAsync(CancellationToken cancellationToken);
+    public async Task<ExternalApiChanges> GetChangesAsync(string keyRangeId, string continuationToken, CancellationToken cancellationToken);
+    
+    // Health monitoring
+    public async Task<bool> IsHealthyAsync();
+}
+```
+
+### 5. Key Range Processing Engine
+```csharp
+public class KeyRangeProcessingEngine
+{
+    public async Task ProcessKeyRangeAsync(
+        ExternalApiLease lease,
+        ExternalApiProcessorContext context,
+        Func<ExternalApiProcessorContext, IReadOnlyCollection<ExternalApiChange>, CancellationToken, Task> onChangesDelegate,
+        CancellationToken cancellationToken);
+        
+    // Error handling with retry logic
+    private async Task HandleProcessingErrorAsync(ExternalApiLease lease, Exception exception);
+    
+    // Checkpoint management
+    private async Task UpdateCheckpointAsync(ExternalApiLease lease, ExternalApiCheckpoint checkpoint);
+}
+```
+
+### 6. Life Cycle Notification System
+```csharp
+// Delegate definitions following Change Feed Processor pattern
+public delegate Task LeaseAcquireDelegate(string leaseToken, string keyRangeId);
+public delegate Task LeaseReleaseDelegate(string leaseToken, string keyRangeId);
+public delegate Task ErrorNotificationDelegate(string leaseToken, Exception exception);
+
+public class ExternalApiProcessorContext
+{
+    public string LeaseToken { get; set; }
+    public string KeyRangeId { get; set; }
+    public ExternalApiHeaders Headers { get; set; }
+    public ExternalApiDiagnostics Diagnostics { get; set; }
+}
+```
+
+## Enhanced Processing Workflow
+
+### 1. Processor Initialization
+```csharp
+// Builder pattern usage
+var processor = ExternalApiChangeProcessor
+    .Create("external-api-processor", HandleChangesAsync)
+    .WithInstanceName(Environment.MachineName + "-" + Guid.NewGuid())
+    .WithLeaseContainer(leaseContainer)
+    .WithLeaseAcquireNotification(OnLeaseAcquiredAsync)
+    .WithLeaseReleaseNotification(OnLeaseReleasedAsync)
+    .WithErrorNotification(OnErrorAsync)
+    .WithLeaseAcquireInterval(TimeSpan.FromSeconds(17))
+    .WithLeaseExpirationTime(TimeSpan.FromSeconds(60))
+    .WithLeaseRenewalInterval(TimeSpan.FromSeconds(13))
+    .WithMaxDegreeOfParallelism(4)
+    .WithPollInterval(TimeSpan.FromSeconds(5))
+    .Build();
+
+await processor.StartAsync();
+```
+
+### 2. Processing Life Cycle
+1. **Lease Discovery**: Periodically scan for available leases (every 17 seconds by default)
+2. **Lease Acquisition**: Attempt to acquire available leases using optimistic concurrency
+3. **Processing Loop**: For each owned lease, continuously process changes
+4. **Lease Renewal**: Renew owned leases every 13 seconds to maintain ownership
+5. **Error Handling**: On errors, release lease and allow other instances to pick up
+6. **Dynamic Scaling**: Automatically redistribute leases when instances join/leave
+
+### 3. Change Processing Delegate
+```csharp
+private static async Task HandleChangesAsync(
+    ExternalApiProcessorContext context,
+    IReadOnlyCollection<ExternalApiChange> changes,
+    CancellationToken cancellationToken)
+{
+    _logger.LogInformation($"Processing {changes.Count} changes for lease {context.LeaseToken}");
+    
+    foreach (var change in changes)
+    {
+        // Process individual change
+        await ProcessChangeAsync(change, cancellationToken);
+    }
+    
+    _logger.LogInformation($"Completed processing changes for lease {context.LeaseToken}");
+}
+```
+
+## Configuration Schema
+
+### appsettings.json
+```json
+{
+  "ExternalApiProcessor": {
+    "ProcessorName": "external-api-processor",
+    "InstanceName": null, // Auto-generated if null
+    "CosmosDb": {
+      "ConnectionString": "...",
+      "DatabaseName": "external-api-processor",
+      "LeaseContainerName": "leases",
+      "MonitoringContainerName": "monitoring"
+    },
+    "ExternalApi": {
+      "BaseUrl": "https://api.example.com",
+      "MetadataEndpoint": "/api/metadata",
+      "ChangesEndpoint": "/api/changes/{keyRangeId}",
+      "OAuth": {
+        "ClientId": "...",
+        "ClientSecret": "...",
+        "TokenEndpoint": "https://auth.example.com/token",
+        "Scope": "api.read"
+      }
+    },
+    "LeaseConfiguration": {
+      "AcquireInterval": "00:00:17",
+      "ExpirationTime": "00:01:00",
+      "RenewalInterval": "00:00:13"
+    },
+    "Processing": {
+      "PollInterval": "00:00:05",
+      "MaxDegreeOfParallelism": 4,
+      "BatchSize": 100
+    },
+    "CircuitBreaker": {
+      "FailureThreshold": 5,
+      "RecoveryTime": "00:00:30"
+    }
+  }
+}
+```
+
+## Enhanced Project Structure
+```
+ExternalApiProcessor/
+├── Core/
+│   ├── ExternalApiChangeProcessor.cs
+│   ├── ExternalApiChangeProcessorBuilder.cs
+│   ├── ExternalApiProcessorContext.cs
+│   └── ExternalApiLease.cs
+├── Services/
+│   ├── ExternalApiChangeProcessorWorker.cs (BackgroundService)
+│   ├── ExternalApiLeaseManager.cs
+│   ├── ExternalApiClient.cs
+│   ├── KeyRangeProcessingEngine.cs
+│   ├── OAuthTokenProvider.cs
+│   └── CircuitBreakerService.cs
+├── Infrastructure/
+│   ├── CosmosDbService.cs
+│   ├── LeaseContainerInitializer.cs
+│   └── HealthCheckExtensions.cs
+├── Models/
+│   ├── ExternalApiChange.cs
+│   ├── ExternalApiMetadata.cs
+│   ├── ExternalApiCheckpoint.cs
+│   ├── ExternalApiHeaders.cs
+│   └── ExternalApiDiagnostics.cs
+├── Configuration/
+│   ├── ExternalApiProcessorConfiguration.cs
+│   ├── LeaseConfiguration.cs
+│   └── ExternalApiConfiguration.cs
+├── Notifications/
+│   ├── LeaseNotificationHandlers.cs
+│   └── ErrorNotificationHandler.cs
+├── Extensions/
+│   ├── ServiceCollectionExtensions.cs
+│   └── HostBuilderExtensions.cs
+├── Program.cs
+├── appsettings.json
+└── Dockerfile
+```
+
+## Advanced Features Based on Change Feed Processor
+
+### 1. Health Monitoring and Diagnostics
+- Request charge tracking for Cosmos DB operations
+- Processing time monitoring with thresholds
+- Lease acquisition/release rate monitoring
+- Circuit breaker state monitoring
+- OAuth token refresh tracking
+
+### 2. Error Handling and Resilience
+- **At-least-once processing guarantee**
+- **Dead letter queue for failed changes**
+- **Exponential backoff for retries**
+- **Circuit breaker for external API**
+- **Automatic lease recovery on failures**
+
+### 3. Performance Optimizations
+- **Parallel processing of multiple leases**
+- **Configurable batch sizes**
+- **Efficient Cosmos DB operations (point reads/writes)**
+- **Connection pooling and reuse**
+- **Optimistic concurrency control**
+
+### 4. Observability and Monitoring
+- **Structured logging with correlation IDs**
+- **Health check endpoints**
+- **Metrics for lease operations and processing rates**
+- **Diagnostic information for slow operations**
+- **Integration with Application Insights**
+
+## Implementation Requirements
+
+### Mandatory Patterns
+1. **Builder Pattern**: For processor configuration (like Change Feed Processor)
+2. **Observer Pattern**: For change processing delegates
+3. **Strategy Pattern**: For different retry and circuit breaker policies
+4. **Factory Pattern**: For creating API clients and lease managers
+5. **Repository Pattern**: For Cosmos DB operations
+
+### Error Handling Requirements
+- All operations must implement retry logic with exponential backoff
+- Circuit breaker must protect against cascading failures
+- Lease conflicts must be handled gracefully with optimistic concurrency
+- Failed changes must be logged to dead letter queue
+- All exceptions must be properly logged with context
+
+### Performance Requirements
+- Support for processing thousands of changes per minute
+- Lease operations should complete within 100ms
+- API calls should timeout after 30 seconds
+- Memory usage should be monitored and controlled
+- CPU usage should be distributed across available cores
+
+## Deliverables
+1. **Complete .NET 8 Worker Service** implementing Change Feed Processor patterns
+2. **Comprehensive service classes** with full implementation
+3. **Configuration management** with environment-specific settings
+4. **Docker containerization** with multi-stage builds
+5. **Health checks** for all dependencies
+6. **Unit and integration tests** with high coverage
+7. **Documentation** with deployment and operational guides
+8. **Monitoring dashboards** and alert configurations
+
+This enhanced design leverages proven patterns from Azure Cosmos DB Change Feed Processor to create a robust, scalable, and fault-tolerant distributed processing system for external API changes.
