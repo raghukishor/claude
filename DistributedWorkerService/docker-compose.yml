@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  # Cosmos DB Emulator for local development
+  cosmosdb-emulator:
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
+    container_name: cosmosdb-emulator
+    ports:
+      - "8081:8081"
+      - "10251:10251"
+      - "10252:10252"
+      - "10253:10253"
+      - "10254:10254"
+    environment:
+      - AZURE_COSMOS_EMULATOR_PARTITION_COUNT=10
+      - AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE=true
+      - AZURE_COSMOS_EMULATOR_IP_ADDRESS_OVERRIDE=127.0.0.1
+    volumes:
+      - cosmos-data:/data/db
+
+  # Worker Service Instance 1
+  worker-service-1:
+    build: .
+    container_name: worker-service-1
+    depends_on:
+      - cosmosdb-emulator
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - WorkerConfiguration__WorkerId=worker-docker-1-{GUID}
+      - CosmosDb__ConnectionString=AccountEndpoint=https://cosmosdb-emulator:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==
+      - CosmosDb__DatabaseName=DistributedWorkerDev
+      - ExternalApi__BaseUrl=https://jsonplaceholder.typicode.com
+      - ExternalApi__MetadataEndpoint=/posts
+      - ExternalApi__GetChangesEndpoint=/posts/{taskId}
+      - ExternalApi__OAuth__TokenEndpoint=https://httpbin.org/post
+      - ExternalApi__OAuth__ClientId=demo-client
+      - ExternalApi__OAuth__ClientSecret=demo-secret
+      - ExternalApi__OAuth__Scope=api.read
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "dotnet", "DistributedWorkerService.dll", "--health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Worker Service Instance 2
+  worker-service-2:
+    build: .
+    container_name: worker-service-2
+    depends_on:
+      - cosmosdb-emulator
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - WorkerConfiguration__WorkerId=worker-docker-2-{GUID}
+      - CosmosDb__ConnectionString=AccountEndpoint=https://cosmosdb-emulator:8081/;AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==
+      - CosmosDb__DatabaseName=DistributedWorkerDev
+      - ExternalApi__BaseUrl=https://jsonplaceholder.typicode.com
+      - ExternalApi__MetadataEndpoint=/posts
+      - ExternalApi__GetChangesEndpoint=/posts/{taskId}
+      - ExternalApi__OAuth__TokenEndpoint=https://httpbin.org/post
+      - ExternalApi__OAuth__ClientId=demo-client
+      - ExternalApi__OAuth__ClientSecret=demo-secret
+      - ExternalApi__OAuth__Scope=api.read
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "dotnet", "DistributedWorkerService.dll", "--health-check"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  cosmos-data:
+    driver: local
