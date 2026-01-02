@@ -19,7 +19,9 @@ builder.Services.AddSingleton(cosmosDbSettings);
 builder.Services.AddSingleton<ICosmosDbClient, CosmosDbClient>();
 
 // Register repositories
-builder.Services.AddScoped<IEffectiveAccessRepository, EffectiveAccessRepository>();
+builder.Services.AddScoped<IRoleAssignmentRepository, RoleAssignmentRepository>();
+builder.Services.AddScoped<IRoleDefinitionRepository, RoleDefinitionRepository>();
+builder.Services.AddSingleton<IRoleDefinitionCache, RoleDefinitionCache>();
 
 // Register services
 builder.Services.AddSingleton<PermissionEvaluator>();

@@ -9,16 +9,19 @@ namespace Rbac.DataPlane.Services;
 
 public class CheckAccessService : ICheckAccessService
 {
-    private readonly IEffectiveAccessRepository _repository;
+    private readonly IRoleAssignmentRepository _assignmentRepository;
+    private readonly IRoleDefinitionCache _roleDefinitionCache;
     private readonly PermissionEvaluator _permissionEvaluator;
     private readonly ConditionEvaluator _conditionEvaluator;
 
     public CheckAccessService(
-        IEffectiveAccessRepository repository,
+        IRoleAssignmentRepository assignmentRepository,
+        IRoleDefinitionCache roleDefinitionCache,
         PermissionEvaluator permissionEvaluator,
         ConditionEvaluator conditionEvaluator)
     {
-        _repository = repository;
+        _assignmentRepository = assignmentRepository;
+        _roleDefinitionCache = roleDefinitionCache;
         _permissionEvaluator = permissionEvaluator;
         _conditionEvaluator = conditionEvaluator;
     }
@@ -37,54 +40,81 @@ public class CheckAccessService : ICheckAccessService
             principals.AddRange(request.Subject.Groups);
         }
 
-        // Get scope hierarchy
-        var scopeHierarchy = ScopeParser.GetScopeHierarchy(request.Resource.Scope);
+        // Get scope hierarchy (scopes that are relevant for this request)
+        // e.g. for /subs/s1/rgs/r1, hierarchy is [/subs/s1/rgs/r1, /subs/s1, /]
+        var scopeHierarchy = new HashSet<string>(
+            ScopeParser.GetScopeHierarchy(request.Resource.Scope), 
+            StringComparer.OrdinalIgnoreCase);
 
-        // Check each principal at each scope level
-        foreach (var principalId in principals)
+        // Fetch assignments for all principals in parallel
+        var assignmentTasks = principals.Select(p => _assignmentRepository.ListByPrincipalAsync(p));
+        var assignmentLists = await Task.WhenAll(assignmentTasks);
+        var allAssignments = assignmentLists.SelectMany(a => a).ToList();
+
+        // Filter assignments that apply to the requested scope
+        var relevantAssignments = allAssignments
+            .Where(a => scopeHierarchy.Contains(a.Scope))
+            .ToList();
+
+        foreach (var assignment in relevantAssignments)
         {
-            foreach (var scope in scopeHierarchy)
+            var roleDefinition = await _roleDefinitionCache.GetAsync(assignment.RoleDefinitionId);
+            if (roleDefinition == null)
             {
-                var effectiveAccess = await _repository.GetByPrincipalAndScopeAsync(principalId, scope);
-                if (effectiveAccess == null)
-                    continue;
-
-                foreach (var role in effectiveAccess.EffectiveRoles)
-                {
-                    rolesEvaluated++;
-
-                    // Evaluate permission
-                    var isDataAction = request.Action.Type == ActionType.DataAction;
-                    var permissionResult = isDataAction
-                        ? _permissionEvaluator.EvaluateDataAction(request.Action.Name, role)
-                        : _permissionEvaluator.Evaluate(request.Action.Name, role);
-
-                    if (!permissionResult.IsAllowed)
-                        continue;
-
-                    // Evaluate condition if present
-                    if (role.Condition != null && !string.IsNullOrEmpty(role.Condition.Expression))
-                    {
-                        conditionsEvaluated++;
-                        var conditionResult = _conditionEvaluator.Evaluate(
-                            role.Condition.Expression,
-                            request.Resource.Attributes);
-
-                        if (!conditionResult.IsSatisfied)
-                            continue;
-                    }
-
-                    // Access granted!
-                    matchedAssignments.Add(new MatchedAssignment
-                    {
-                        AssignmentId = role.AssignmentId,
-                        RoleDefinitionId = role.RoleDefinitionId,
-                        RoleName = role.RoleName,
-                        Scope = scope,
-                        MatchedPermission = permissionResult.MatchedPattern ?? ""
-                    });
-                }
+                continue; // Skip if role definition not found
             }
+
+            rolesEvaluated++;
+
+            // Create a temporary EffectiveRole context for the evaluator
+            // Use the RoleDefinition's permissions directly
+            // Helper method or construct on the fly? 
+            // The PermissionEvaluator expects an EffectiveRole or just permissions?
+            // Checking existing code: _permissionEvaluator.Evaluate(..., role) where role is EffectiveRole.
+            // I should verify PermissionEvaluator signature.
+            // Assuming I can construct a transient EffectiveRole or update Evaluator. 
+            // To minimize changes, I'll construct a transient EffectiveRole.
+            
+            var transientRole = new EffectiveRole
+            {
+                RoleDefinitionId = roleDefinition.Id,
+                RoleName = roleDefinition.Name,
+                AssignmentId = assignment.Id,
+                AssignmentScope = assignment.Scope,
+                Condition = assignment.Condition,
+                Permissions = MergePermissions(roleDefinition.Permissions)
+            };
+
+            // Evaluate permission
+            var isDataAction = request.Action.Type == ActionType.DataAction;
+            var permissionResult = isDataAction
+                ? _permissionEvaluator.EvaluateDataAction(request.Action.Name, transientRole)
+                : _permissionEvaluator.Evaluate(request.Action.Name, transientRole);
+
+            if (!permissionResult.IsAllowed)
+                continue;
+
+            // Evaluate condition if present
+            if (assignment.Condition != null && !string.IsNullOrEmpty(assignment.Condition.Expression))
+            {
+                conditionsEvaluated++;
+                var conditionResult = _conditionEvaluator.Evaluate(
+                    assignment.Condition.Expression,
+                    request.Resource.Attributes);
+
+                if (!conditionResult.IsSatisfied)
+                    continue;
+            }
+
+            // Access granted!
+            matchedAssignments.Add(new MatchedAssignment
+            {
+                AssignmentId = assignment.Id,
+                RoleDefinitionId = roleDefinition.Id,
+                RoleName = roleDefinition.Name,
+                Scope = assignment.Scope,
+                MatchedPermission = permissionResult.MatchedPattern ?? ""
+            });
         }
 
         stopwatch.Stop();
@@ -126,6 +156,12 @@ public class CheckAccessService : ICheckAccessService
         var allowed = 0;
         var denied = 0;
 
+        // Optimization: Could pre-fetch all assignments for the subject once if subject is same for all items
+        // But requests might have different subjects?
+        // BatchCheckAccess usually implies same subject?
+        // Let's assume naive iteration for now to match interface. 
+        // If request list is large, we might want to optimize.
+        
         foreach (var item in request.Requests)
         {
             var checkRequest = new CheckAccessRequest
@@ -164,5 +200,33 @@ public class CheckAccessService : ICheckAccessService
                 TotalDurationMs = stopwatch.ElapsedMilliseconds
             }
         };
+    }
+
+    // Helper to merge permissions from RoleDefinition
+    private Rbac.Shared.Models.Common.Permission MergePermissions(List<Rbac.Shared.Models.Common.Permission> permissions)
+    {
+        var merged = new Rbac.Shared.Models.Common.Permission
+        {
+            Actions = new List<string>(),
+            NotActions = new List<string>(),
+            DataActions = new List<string>(),
+            NotDataActions = new List<string>()
+        };
+
+        foreach (var perm in permissions)
+        {
+            merged.Actions.AddRange(perm.Actions);
+            merged.NotActions.AddRange(perm.NotActions);
+            merged.DataActions.AddRange(perm.DataActions);
+            merged.NotDataActions.AddRange(perm.NotDataActions);
+        }
+
+        // Remove duplicates
+        merged.Actions = merged.Actions.Distinct().ToList();
+        merged.NotActions = merged.NotActions.Distinct().ToList();
+        merged.DataActions = merged.DataActions.Distinct().ToList();
+        merged.NotDataActions = merged.NotDataActions.Distinct().ToList();
+
+        return merged;
     }
 }

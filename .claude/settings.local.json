@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(dotnet run)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(curl -s \"https://api.github.com/repos/raghukishor/claude/pulls/1/comments\")"
     ],
     "deny": []
   }

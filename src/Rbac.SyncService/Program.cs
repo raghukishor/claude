@@ -1,5 +1,5 @@
 using Rbac.Shared.CosmosDb;
-using Rbac.SyncService.Idempotency;
+
 using Rbac.SyncService.Processors;
 using Rbac.SyncService.Workers;
 
@@ -29,23 +29,13 @@ builder.Services.AddSingleton(sp => new DataPlaneCosmosDbClient(dataPlaneSetting
 // Register helper services for DI
 builder.Services.AddSingleton<ICosmosDbClient>(sp => sp.GetRequiredService<ControlPlaneCosmosDbClient>());
 
-// Register processors and engine
-builder.Services.AddSingleton<DenormalizationEngine>();
-builder.Services.AddSingleton<ReplayDetector>();
-
+// Register processors
 builder.Services.AddSingleton<RoleAssignmentProcessor>(sp =>
     new RoleAssignmentProcessor(
-        sp.GetRequiredService<DataPlaneCosmosDbClient>(),
-        sp.GetRequiredService<ControlPlaneCosmosDbClient>(),
-        sp.GetRequiredService<DenormalizationEngine>(),
-        sp.GetRequiredService<ReplayDetector>(),
         sp.GetRequiredService<ILogger<RoleAssignmentProcessor>>()));
 
 builder.Services.AddSingleton<RoleDefinitionProcessor>(sp =>
     new RoleDefinitionProcessor(
-        sp.GetRequiredService<DataPlaneCosmosDbClient>(),
-        sp.GetRequiredService<DenormalizationEngine>(),
-        sp.GetRequiredService<ReplayDetector>(),
         sp.GetRequiredService<ILogger<RoleDefinitionProcessor>>()));
 
 // Register background workers
