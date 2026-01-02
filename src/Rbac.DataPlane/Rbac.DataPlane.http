@@ -1,0 +1,6 @@
+@Rbac.DataPlane_HostAddress = http://localhost:5028
+
+GET {{Rbac.DataPlane_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

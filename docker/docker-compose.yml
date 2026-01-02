@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  controlplane:
+    build:
+      context: ..
+      dockerfile: docker/controlplane/Dockerfile
+    ports:
+      - "5001:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - CosmosDb__Endpoint=https://host.docker.internal:8081
+      - CosmosDb__Key=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==
+      - CosmosDb__DatabaseName=RbacControlPlane
+    depends_on: []
+    networks:
+      - rbac-network
+
+  dataplane:
+    build:
+      context: ..
+      dockerfile: docker/dataplane/Dockerfile
+    ports:
+      - "5002:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - CosmosDb__Endpoint=https://host.docker.internal:8081
+      - CosmosDb__Key=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==
+      - CosmosDb__DatabaseName=RbacDataPlane
+    depends_on: []
+    networks:
+      - rbac-network
+
+  syncservice:
+    build:
+      context: ..
+      dockerfile: docker/syncservice/Dockerfile
+    environment:
+      - CosmosDb__ControlPlane__Endpoint=https://host.docker.internal:8081
+      - CosmosDb__ControlPlane__Key=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==
+      - CosmosDb__ControlPlane__DatabaseName=RbacControlPlane
+      - CosmosDb__DataPlane__Endpoint=https://host.docker.internal:8081
+      - CosmosDb__DataPlane__Key=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==
+      - CosmosDb__DataPlane__DatabaseName=RbacDataPlane
+    depends_on:
+      - controlplane
+      - dataplane
+    networks:
+      - rbac-network
+
+networks:
+  rbac-network:
+    driver: bridge

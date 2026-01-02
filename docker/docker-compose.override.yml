@@ -1,0 +1,25 @@
+version: '3.8'
+
+# Local development overrides
+# Use: docker-compose -f docker-compose.yml -f docker-compose.override.yml up
+
+services:
+  controlplane:
+    build:
+      context: ..
+      dockerfile: docker/controlplane/Dockerfile
+    volumes:
+      - ~/.aspnet/https:/root/.aspnet/https:ro
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+      - ASPNETCORE_ENVIRONMENT=Development
+
+  dataplane:
+    build:
+      context: ..
+      dockerfile: docker/dataplane/Dockerfile
+    volumes:
+      - ~/.aspnet/https:/root/.aspnet/https:ro
+    environment:
+      - ASPNETCORE_URLS=http://+:8080
+      - ASPNETCORE_ENVIRONMENT=Development
