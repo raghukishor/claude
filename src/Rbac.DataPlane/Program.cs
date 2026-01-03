@@ -45,6 +45,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.UseMiddleware<Rbac.DataPlane.Middleware.DiagnosticsMiddleware>();
 app.UseMiddleware<Rbac.DataPlane.Middleware.UnhandledExceptionHandler>();
 
 app.UseHttpsRedirection();
